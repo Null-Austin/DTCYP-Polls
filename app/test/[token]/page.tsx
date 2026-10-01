@@ -1,3 +1,7 @@
+// app/test/[token]/page.tsx
+
+import Poll from "@/components/Poll"
+
 export default async function PollPage({
   params,
 }: {
@@ -5,5 +9,7 @@ export default async function PollPage({
 }) {
   const { token } = await params
 
-  return <div>Token: {token}</div>
+  const poll = await token
+
+  return <Poll poll={poll} />
 }
