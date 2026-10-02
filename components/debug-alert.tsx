@@ -1,3 +1,5 @@
+"use client";
+
 type DebugAlertProps = {
   title: string
   children: React.ReactNode

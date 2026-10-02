@@ -273,6 +273,43 @@ body {
 .debug-alert--error { color: #a32920; border-color: #efc2be; background: #fff4f3; }
 .debug-alert__icon { background: currentColor; color: white; }
 
+.alert-provider {
+  position: fixed;
+  display: grid;
+  gap: 10px;
+  right: 24px;
+  bottom: 24px;
+  z-index: 1000;
+  width: min(360px, calc(100vw - 48px));
+}
+
+.alert-provider__item {
+  position: relative;
+}
+
+.alert-provider__dismiss {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  color: currentColor;
+  background: transparent;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+}
+
+@media (max-width: 700px) {
+  .alert-provider {
+    right: 16px;
+    bottom: 16px;
+    width: calc(100vw - 32px);
+  }
+}
+
 .debug-form { display: grid; gap: 8px; }
 .debug-form label { color: $colortext; font-size: 12px; font-weight: 600; }
 .debug-form input:not([type="checkbox"]) { width: 100%; min-height: 40px; padding: 0 12px; border: 1px solid $colorborder; border-radius: 5px; background: white; color: $colortext; font: inherit; font-size: 13px; }

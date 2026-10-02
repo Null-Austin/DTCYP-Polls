@@ -1,9 +1,13 @@
+"use client";
+
 import PollLogo from "@/components/poll/logo"
 import DebugAlert from "@/components/debug-alert"
-import DebugButton from "@/components/debug-button"
+import Button from "@/components/button"
 import PollOption from "@/components/poll/poll-option"
 import StatusBadge from "@/components/poll/status-badge"
 import VersionText from "@/components/versiontext"
+
+import { showAlert } from "@/lib/alerts";
 
 export default function ThemeTestPage() {
   return (
@@ -39,10 +43,45 @@ export default function ThemeTestPage() {
         <div className="debug-section">
           <h2>Buttons</h2>
           <div className="debug-section__content debug-row">
-            <DebugButton>Continue</DebugButton>
-            <DebugButton variant="secondary">Save draft</DebugButton>
-            <DebugButton variant="quiet">Cancel</DebugButton>
-            <DebugButton variant="danger">Delete</DebugButton>
+            <Button onClick={
+              ()=>{
+                showAlert({
+                  title: "Continue",
+                  message: "Your action was continued successfully.",
+                  tone: "success",
+                });
+              }
+            }>Continue</Button>
+            <Button
+              variant="secondary"
+              onClick={() => showAlert({
+                title: "Saved",
+                message: "Your draft was saved successfully.",
+                tone: "success",
+              })}
+            >
+              Save draft
+            </Button>
+            <Button
+              variant="quiet"
+              onClick={() => showAlert({
+                title: "Cancelled",
+                message: "No changes were made.",
+                tone: "info",
+              })}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => showAlert({
+                title: "Deleted",
+                message: "The item was deleted.",
+                tone: "error",
+              })}
+            >
+              Delete
+            </Button>
           </div>
         </div>
 
