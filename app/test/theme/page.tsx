@@ -3,6 +3,7 @@ import DebugAlert from "@/components/debug-alert"
 import DebugButton from "@/components/debug-button"
 import PollOption from "@/components/poll/poll-option"
 import StatusBadge from "@/components/poll/status-badge"
+import VersionText from "@/components/versiontext"
 
 export default function ThemeTestPage() {
   return (
@@ -75,7 +76,7 @@ export default function ThemeTestPage() {
 
       <footer className="theme-page__footer">
         <span>All examples are intentionally simple.</span>
-        <span>v0.1 / theme</span>
+        <span><VersionText /></span>
       </footer>
     </main>
   )
