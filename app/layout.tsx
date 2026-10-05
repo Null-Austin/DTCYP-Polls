@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import "./globals.scss";
+import "./ui.scss";
 import AlertProvider from "@/components/alert-provider";
 
 const geistSans = Geist({
@@ -19,7 +21,8 @@ export const metadata: Metadata = {
   description: "Polling app",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default async function RootLayout({ children }: LayoutProps<"/">) {
+  await headers(); // opt into dynamic rendering so the proxy's CSP nonce applies
   return (
     <html
       lang="en"
