@@ -13,7 +13,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 A deliberately simple polling site. One poll has many unique links; every link opens the same poll. We track the link, never the person.
 
 - First answer per link is saved as `verified`, later answers with the same link as `unverified` (kept, never overwriting the first). Polls with "require verification" off store every answer as `accepted`, which results treat as verified. Verification depends only on the link token: no IP, cookie or fingerprint, ever.
-- Respondents are never told whether they were verified. They only see a notice that a link was already used.
+- Respondents are never told whether they were verified or whether a link was already used; the public API and page reveal nothing about it.
 - The homepage is intentionally bare (just the logo). Do not add details to it.
 
 ## Stack and layout
@@ -24,10 +24,11 @@ A deliberately simple polling site. One poll has many unique links; every link o
 - Admin (session required, server layout re-checks): `/admin`, `/admin/polls`, `/admin/{pollid}/edit|links|results`, `/admin/users|audit|settings` (admin only), `/admin/account`.
 
 ## Rules to keep
-- Every API route is wrapped in `route({ access }, handler)` from `lib/server/authz.ts` (401 no session, 403 forbidden, CSRF token + origin check on writes). Poll/batch access goes through `ownedPoll` / `ownedBatch` (editors only reach their own; others look like 404).
+- Every API route is wrapped in `route({ access }, handler)` from `lib/server/authz.ts` (401 no session, 403 forbidden, CSRF token + origin check on writes). Poll/batch access goes through `ownedPoll(db, user, id, { need })` / `ownedBatch` (levels `view` < `edit` < `owner`; owner and admins have `owner`; polls can be shared with internal users via `poll_shares` as view or edit; no access looks like 404, too little access is 403). Trash, permanent delete and sharing need `owner`.
 - Public poll failures (bad token, wrong poll, revoked, trashed) all return the same 404.
 - Parse request bodies with `readJson` + `exact(...)` (size cap, unknown fields rejected). Parameterise SQL; only whitelisted fragments may be interpolated.
 - Store no IPs, user agents, referrers or precise times. Submission time is rounded to the hour; device is `mobile|desktop`; language is a 2-letter code. Never log tokens or query strings.
+- Admin-only `/api/admin/export` is the "super export" (all tracked data, tokens, owners, user list without secrets). Keep it admin-only and audited.
 - Export URLs use `PUBLIC_BASE_URL` (or the admin setting), never the Host header. CSV cells go through `csvCell`.
 - Production refuses to start without a 32+ char `SESSION_SECRET`. See `.env.example`.
 - Commands: `npm run dev|build|test|lint|typecheck`, `npm run seed`, `npm run reset-admin -- <username>`.

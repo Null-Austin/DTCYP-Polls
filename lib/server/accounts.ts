@@ -42,7 +42,10 @@ function tokenMatches(given: unknown): boolean {
 
 export async function createFirstAdmin(db: DB, body: Record<string, unknown>) {
   if (!setupRequired(db)) throw new HttpError(404, "Not found")
-  if (!tokenMatches(body.setupToken)) throw new HttpError(403, "Setup token required")
+  if (!tokenMatches(body.setupToken)) {
+    audit(db, null, "setup_token_rejected")
+    throw new HttpError(403, "Setup token required")
+  }
   const username = cleanUsername(body.username)
   const email = cleanEmail(body.email)
   const hash = await hashPassword(validatePassword(body.password, username))

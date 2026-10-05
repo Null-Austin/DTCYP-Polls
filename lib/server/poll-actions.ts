@@ -10,7 +10,7 @@ export const ACTIONS = ["close", "reopen", "archive", "unarchive", "trash", "res
 export type Action = (typeof ACTIONS)[number]
 
 export function applyAction(db: DB, user: User, pollId: string, action: Action) {
-  const p = ownedPoll(db, user, pollId, { includeDeleted: action === "restore" })
+  const p = ownedPoll(db, user, pollId, { includeDeleted: action === "restore", need: action === "trash" || action === "restore" ? "owner" : "edit" })
   const now = nowIso()
   const set = (sql: string, ...a: (string | null)[]) => db.prepare(`UPDATE polls SET ${sql}, updated_at = ? WHERE id = ?`).run(...a, now, p.id)
   if (action === "close") set("status = 'closed'")
@@ -28,7 +28,7 @@ export function applyAction(db: DB, user: User, pollId: string, action: Action) 
 }
 
 export function duplicatePoll(db: DB, user: User, pollId: string, newId: string): string {
-  const src = ownedPoll(db, user, pollId)
+  const src = ownedPoll(db, user, pollId, { need: "view" })
   const id = cleanSlug(newId)
   if (db.prepare("SELECT 1 FROM polls WHERE id = ?").get(id)) throw new HttpError(409, "That poll id is taken")
   const now = nowIso()

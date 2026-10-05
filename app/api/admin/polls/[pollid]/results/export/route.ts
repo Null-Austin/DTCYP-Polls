@@ -4,7 +4,7 @@ import { pollResults } from "@/lib/server/results"
 import { audit } from "@/lib/server/audit"
 
 export const GET = route<{ pollid: string }>({ access: "user" }, ({ db, user, params }) => {
-  const poll = ownedPoll(db, user, params.pollid, { includeDeleted: true })
+  const poll = ownedPoll(db, user, params.pollid, { includeDeleted: true, need: "view" })
   const res = pollResults(db, poll.id)
   const lines = ["question,type,answer,verified,unverified"]
   for (const q of res.questions) {

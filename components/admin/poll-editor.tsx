@@ -12,6 +12,7 @@ type Q = { key: string; id?: number; prompt: string; type: QType; required: bool
 type Dto = {
   id: string; title: string; description: string; status: "draft" | "open" | "closed"; requireVerification: boolean
   opensAt: string | null; closesAt: string | null; hasResponses: boolean
+  access: "view" | "edit" | "owner"
   questions: { id: number; prompt: string; type: QType; required: boolean; options: { id: number; label: string }[] }[]
 }
 type Draft = { title: string; description: string; status: Dto["status"]; requireVerification: boolean; opensAt: string; closesAt: string; questions: Q[] }
@@ -64,6 +65,7 @@ export default function PollEditor({ pollId }: { pollId: string }) {
   if (error) return <p className="err">{error}</p>
   if (!draft || !data) return <p className="muted">Loading...</p>
   const locked = data.hasResponses
+  const readOnly = data.access === "view"
   const upd = (patch: Partial<Draft>) => setDraft({ ...draft, ...patch })
   const updQ = (k: string, patch: Partial<Q>) => upd({ questions: draft.questions.map((q) => (q.key === k ? { ...q, ...patch } : q)) })
   const move = <T,>(arr: T[], from: number, to: number) => {
@@ -100,7 +102,9 @@ export default function PollEditor({ pollId }: { pollId: string }) {
       <PollTabs pollId={pollId} current="edit" />
       <div className="editor">
         <div>
+          {readOnly && <p className="pf__notice">This poll is shared with you as view-only.</p>}
           {locked && <p className="pf__notice">This poll has responses. You can reword and reorder, but not add, remove or retype questions and options. Duplicate the poll to restructure it.</p>}
+          <fieldset disabled={readOnly} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
           <label className="field">Poll title<input value={draft.title} maxLength={200} onChange={(e) => upd({ title: e.target.value })} /></label>
           <label className="field" style={{ marginTop: 12 }}>Description (optional)<textarea rows={2} maxLength={2000} value={draft.description} onChange={(e) => upd({ description: e.target.value })} /></label>
           <div className="seg" role="group" aria-label="Status" style={{ margin: "16px 0" }}>
@@ -174,6 +178,7 @@ export default function PollEditor({ pollId }: { pollId: string }) {
             <button className="btn" disabled={busy || !dirty} onClick={() => { setDraft(toDraft(data)); setErr("") }}>Discard</button>
             <small className="muted">{dirty ? "Unsaved changes" : saved}</small>
           </div>
+          </fieldset>
         </div>
 
         <aside className="preview" aria-label="Preview">
@@ -181,7 +186,7 @@ export default function PollEditor({ pollId }: { pollId: string }) {
           <div className="light"><PollForm title={draft.title || "Untitled"} description={draft.description} questions={preview} preview /></div>
           <div style={{ marginTop: 16 }}>
             <label className="toggle">
-              <input type="checkbox" checked={draft.requireVerification} onChange={(e) => upd({ requireVerification: e.target.checked })} />
+              <input type="checkbox" disabled={readOnly} checked={draft.requireVerification} onChange={(e) => upd({ requireVerification: e.target.checked })} />
               Require verification
             </label>
             <p className="muted" style={{ fontSize: 12 }}>On: the first answer per link is verified, repeats are marked unverified. Off: every answer counts as verified.</p>

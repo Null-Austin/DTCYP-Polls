@@ -176,3 +176,4 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
 .bar .v { background: var(--success); }
 .bar .u { background: var(--warning); }
 .mono { font-family: var(--font-geist-mono), monospace; font-size: 12px; }
+[hidden] { display: none !important; }

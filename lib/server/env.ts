@@ -18,7 +18,7 @@ export function sessionSecret(): string {
 }
 
 export const env = {
-  databasePath: () => path.resolve(process.env.DATABASE_PATH || "data/polls.db"),
+  databasePath: () => path.resolve(/*turbopackIgnore: true*/ process.env.DATABASE_PATH || "data/polls.db"),
   publicBaseUrl: () => (process.env.PUBLIC_BASE_URL || "").replace(/\/+$/, ""),
   setupToken: () => process.env.SETUP_TOKEN || "",
   retentionDays: () => int(process.env.RESPONSE_RETENTION_DAYS, 365),

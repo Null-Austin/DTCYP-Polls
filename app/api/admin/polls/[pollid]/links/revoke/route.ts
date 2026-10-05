@@ -4,7 +4,7 @@ import { nowIso } from "@/lib/server/db"
 import { audit } from "@/lib/server/audit"
 
 export const POST = route<{ pollid: string }>({ access: "user" }, async ({ req, db, user, params }) => {
-  const poll = ownedPoll(db, user, params.pollid)
+  const poll = ownedPoll(db, user, params.pollid, { need: "edit" })
   const body = await readJson(req, 512)
   exact(body, ["token"])
   if (typeof body.token !== "string") throw new HttpError(400, "Invalid token")

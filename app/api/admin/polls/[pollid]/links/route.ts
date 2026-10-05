@@ -6,7 +6,7 @@ import { audit } from "@/lib/server/audit"
 type P = { pollid: string }
 
 export const GET = route<P>({ access: "user" }, ({ db, user, params, url }) => {
-  const poll = ownedPoll(db, user, params.pollid)
+  const poll = ownedPoll(db, user, params.pollid, { need: "view" })
   const q = (url.searchParams.get("q") ?? "").slice(0, 64)
   let matches: unknown[] | undefined
   if (q) {
@@ -21,11 +21,11 @@ export const GET = route<P>({ access: "user" }, ({ db, user, params, url }) => {
       )
       .all(poll.id, like)
   }
-  return json({ pollTitle: poll.title, stats: linkStats(db, poll.id), batches: batchList(db, poll.id), matches })
+  return json({ pollTitle: poll.title, access: poll.access, stats: linkStats(db, poll.id), batches: batchList(db, poll.id), matches })
 })
 
 export const POST = route<P>({ access: "user" }, async ({ req, db, user, params }) => {
-  const poll = ownedPoll(db, user, params.pollid)
+  const poll = ownedPoll(db, user, params.pollid, { need: "edit" })
   const body = await readJson(req, 2048)
   exact(body, ["count", "label"])
   const count = intIn(body.count, 1, MAX_BATCH)

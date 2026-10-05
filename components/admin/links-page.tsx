@@ -8,6 +8,7 @@ import { useLoad } from "@/lib/client/use-load"
 type Batch = { id: number; label: string; count: number; createdAt: string; revoked: number; verified: number; unverified: number }
 type Data = {
   pollTitle: string
+  access: "view" | "edit" | "owner"
   stats: { generated: number; answered: number; repeats: number }
   batches: Batch[]
   matches?: { token: string; revokedAt: string | null; label: string; verified: number; unverified: number }[]
@@ -79,7 +80,7 @@ export default function LinksPage({ pollId }: { pollId: string }) {
       {toast && <div className="toast" role="status">✅ {toast}</div>}
       {(error || err) && <p className="err" role="alert">{error || err}</p>}
 
-      <section className="panel">
+      <section className="panel" hidden={data?.access === "view"}>
         <div className="form">
           <label>Batch label (optional)<input value={label} maxLength={100} onChange={(e) => setLabel(e.target.value)} placeholder="April 10th" /></label>
           <div className="field">
@@ -118,7 +119,7 @@ export default function LinksPage({ pollId }: { pollId: string }) {
                 <td>{fmtDate(b.createdAt)}</td>
                 <td><span className="ok">{b.verified} ✅</span> <span className="warn">{b.unverified} ⚠️</span></td>
                 <td>
-                  <div className="actions">
+                  <div className="actions" hidden={data.access === "view"}>
                     <button className="copy" aria-label="Copy links" title="Copy links" onClick={(e) => { e.stopPropagation(); void copy(b.id) }}>⧉</button>
                     <a className="btn btn--sm" href={exportUrl(b.id, "csv")}>CSV</a>
                     <a className="btn btn--sm" href={exportUrl(b.id, "txt")}>TXT</a>

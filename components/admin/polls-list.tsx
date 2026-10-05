@@ -4,10 +4,10 @@ import Link from "next/link"
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { useLoad } from "@/lib/client/use-load"
-import { api, errMsg, fmtDate } from "@/lib/client/api"
+import { api, errMsg, fmtDate, FULL_WARNING } from "@/lib/client/api"
 import { showAlert } from "@/lib/alerts"
 
-type Row = { id: string; title: string; status: string; owner_id: number; owner: string; created_at: string; archived_at: string | null; deleted_at: string | null; responses: number; last_response: string | null }
+type Row = { id: string; title: string; status: string; owner_id: number; owner: string; access: "view" | "edit" | "owner"; created_at: string; archived_at: string | null; deleted_at: string | null; responses: number; last_response: string | null }
 type User = { id: number; username: string }
 
 export default function PollsList({ isAdmin }: { isAdmin: boolean }) {
@@ -100,6 +100,12 @@ export default function PollsList({ isAdmin }: { isAdmin: boolean }) {
             {users.data?.users.map((u) => <option key={u.id} value={u.id}>{u.username}</option>)}
           </select>
         )}
+        {isAdmin && (
+          <>
+            <a className="btn" href="/api/admin/export?format=json" onClick={(e) => { if (!confirm(FULL_WARNING)) e.preventDefault() }}>Export everything (JSON)</a>
+            <a className="btn" href="/api/admin/export?format=csv" onClick={(e) => { if (!confirm(FULL_WARNING)) e.preventDefault() }}>CSV</a>
+          </>
+        )}
       </div>
       {(error || err) && <p className="err" role="alert">{error || err}</p>}
       {sel.length > 0 && (
@@ -122,7 +128,7 @@ export default function PollsList({ isAdmin }: { isAdmin: boolean }) {
             {rows.map((p) => (
               <tr key={p.id} className={sel.includes(p.id) ? "is-sel" : ""}>
                 <td><input type="checkbox" aria-label={`Select ${p.title}`} checked={sel.includes(p.id)} onChange={(e) => setSel(e.target.checked ? [...sel, p.id] : sel.filter((x) => x !== p.id))} /></td>
-                <td><strong>{p.title}</strong><div className="mono muted">{p.id}</div></td>
+                <td><strong>{p.title}</strong><div className="mono muted">{p.id}{p.access !== "owner" && ` · shared by ${p.owner} (${p.access})`}</div></td>
                 <td><span className="chip">{p.deleted_at ? "trash" : p.archived_at ? "archived" : p.status}</span></td>
                 {isAdmin && <td>{p.owner}</td>}
                 <td>{fmtDate(p.created_at)}</td>
@@ -137,13 +143,16 @@ export default function PollsList({ isAdmin }: { isAdmin: boolean }) {
                       </>
                     ) : (
                       <>
-                        <Link className="btn btn--sm" href={`/admin/${p.id}/edit`}>Edit</Link>
+                        <Link className="btn btn--sm" href={`/admin/${p.id}/edit`}>{p.access === "view" ? "View" : "Edit"}</Link>
                         <Link className="btn btn--sm" href={`/admin/${p.id}/links`}>Links</Link>
                         <Link className="btn btn--sm" href={`/admin/${p.id}/results`}>Results</Link>
+                        <Link className="btn btn--sm" href={`/admin/${p.id}/share`}>Share</Link>
                         <button className="btn btn--sm" onClick={() => dup(p.id)}>Duplicate</button>
+                        {p.access !== "view" && (<>
                         {p.status === "open" ? <button className="btn btn--sm" onClick={() => act(p.id, "close")}>Close</button> : <button className="btn btn--sm" onClick={() => act(p.id, "reopen")}>Reopen</button>}
                         {p.archived_at ? <button className="btn btn--sm" onClick={() => act(p.id, "unarchive")}>Unarchive</button> : <button className="btn btn--sm" onClick={() => act(p.id, "archive")}>Archive</button>}
-                        <button className="btn btn--sm btn--danger" onClick={() => act(p.id, "trash")}>Trash</button>
+                        </>)}
+                        {p.access === "owner" && <button className="btn btn--sm btn--danger" onClick={() => act(p.id, "trash")}>Trash</button>}
                       </>
                     )}
                   </div>

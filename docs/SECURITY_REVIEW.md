@@ -13,6 +13,8 @@ Scope: own code, reviewed after the build. "Verified by test" means an assertion
 | Mass assignment, reserved/malformed slugs, last-admin protection | Verified by test |
 | Export: N unique URLs from `PUBLIC_BASE_URL` (Host ignored), CSV formula neutralized | Verified by test |
 | No IP/UA/referrer in DB or audit log | Verified by test and schema column check |
+| Admin-only full export (`/api/admin/export`): 401 anonymous, 403 editor, no password hashes, audited | Verified by test. The file holds link tokens and all response fields, so treat it as sensitive |
+| Audit trail: logins, failures, lockouts, denied access (path only), exports, result views, setting keys | Verified by test |
 | CSP nonce, security headers, `/test` 404, `/admin` redirect, no request logging, hydration under CSP | Verified manually (production build) |
 | SQL injection | All user values parameterized; the only interpolated fragments are constants or whitelisted (sort columns). Checked by grep |
 | XSS | No `dangerouslySetInnerHTML` in app code (grep). Rendering of hostile strings is not covered by an automated test |

@@ -10,6 +10,7 @@ export const POST = route({ access: "user", allowMustChange: true }, async ({ re
   exact(body, ["current", "next"])
   const row = db.prepare("SELECT password_hash FROM users WHERE id = ?").get(user.id) as { password_hash: string }
   if (typeof body.current !== "string" || !(await verifyPassword(row.password_hash, body.current))) {
+    audit(db, user.id, "password_change_failed", { type: "user", id: user.id })
     throw new HttpError(400, "Current password is incorrect")
   }
   const next = validatePassword(body.next, user.username)

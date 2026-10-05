@@ -3,8 +3,8 @@ import { json } from "@/lib/server/http"
 
 export const GET = route({ access: "user" }, ({ db, user }) => {
   const admin = user.role === "admin"
-  const scope = admin ? "1=1" : "p.owner_id = ?"
-  const a = admin ? [] : [user.id]
+  const scope = admin ? "1=1" : "(p.owner_id = ? OR EXISTS (SELECT 1 FROM poll_shares s WHERE s.poll_id = p.id AND s.user_id = ?))"
+  const a = admin ? [] : [user.id, user.id]
   const n = (sql: string) => (db.prepare(sql).get(...a) as { n: number }).n
   const base = "p.deleted_at IS NULL"
   return json({

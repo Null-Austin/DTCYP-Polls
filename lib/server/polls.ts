@@ -96,8 +96,9 @@ export function saveQuestions(db: DB, pollId: string, qs: QuestionIn[]) {
   })
 }
 
-export function pollDto(db: DB, p: PollRow) {
+export function pollDto(db: DB, p: PollRow & { access?: string }) {
   return {
+    access: p.access ?? "owner",
     id: p.id,
     title: p.title,
     description: p.description,

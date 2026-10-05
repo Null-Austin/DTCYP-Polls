@@ -116,4 +116,17 @@ CREATE TABLE settings (
 );
 `,
   },
+  {
+    id: 2,
+    sql: `
+CREATE TABLE poll_shares (
+  poll_id TEXT NOT NULL REFERENCES polls(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  permission TEXT NOT NULL CHECK (permission IN ('view','edit')),
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (poll_id, user_id)
+);
+CREATE INDEX poll_shares_user ON poll_shares(user_id);
+`,
+  },
 ]

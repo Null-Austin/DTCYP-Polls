@@ -3,6 +3,7 @@
 import { useState } from "react"
 import PollTabs from "./poll-tabs"
 import { useLoad } from "@/lib/client/use-load"
+import { FULL_WARNING } from "@/lib/client/api"
 
 type Opt = { id: number; label: string; verified: number; unverified: number }
 type Data = {
@@ -13,7 +14,7 @@ type Data = {
   questions: { id: number; prompt: string; type: string; options: Opt[]; texts: { text: string; status: string }[] }[]
 }
 
-export default function ResultsPage({ pollId }: { pollId: string }) {
+export default function ResultsPage({ pollId, isAdmin }: { pollId: string; isAdmin: boolean }) {
   const { data, error } = useLoad<Data>(`/api/admin/polls/${pollId}/results`)
   const [combine, setCombine] = useState(false)
   return (
@@ -32,6 +33,12 @@ export default function ResultsPage({ pollId }: { pollId: string }) {
           <div className="row" style={{ marginBottom: 16 }}>
             <label className="toggle"><input type="checkbox" checked={combine} onChange={(e) => setCombine(e.target.checked)} />Combine verified and unverified</label>
             <span className="grow" />
+            {isAdmin && (
+              <>
+                <a className="btn" href={`/api/admin/export?poll=${pollId}&format=json`} onClick={(e) => { if (!confirm(FULL_WARNING)) e.preventDefault() }}>Super export (JSON)</a>
+                <a className="btn" href={`/api/admin/export?poll=${pollId}&format=csv`} onClick={(e) => { if (!confirm(FULL_WARNING)) e.preventDefault() }}>Super export (CSV)</a>
+              </>
+            )}
             <a className="btn" href={`/api/admin/polls/${pollId}/results/export`}>Export results CSV</a>
           </div>
           {data.questions.map((q) => {

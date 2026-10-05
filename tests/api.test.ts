@@ -21,6 +21,9 @@ import * as submitR from "@/app/api/polls/[pollid]/responses/route"
 import * as auditR from "@/app/api/admin/audit/route"
 import * as settingsR from "@/app/api/admin/settings/route"
 import * as dashR from "@/app/api/admin/dashboard/route"
+import * as fullR from "@/app/api/admin/export/route"
+import * as sharesR from "@/app/api/admin/polls/[pollid]/shares/route"
+import * as revokeLinkR from "@/app/api/admin/polls/[pollid]/links/revoke/route"
 import { runJobs } from "@/lib/server/jobs"
 import { cookieName, sessionFromId } from "@/lib/server/auth"
 
@@ -102,13 +105,14 @@ describe("verification", () => {
     expect((res.data as { totals: { verified: number; unverified: number } }).totals).toMatchObject({ verified: 2, unverified: 0 })
   })
 
-  it("the public page reports a used link", async () => {
+  it("the public page never reveals whether a link was used", async () => {
     const admin = await setupAdmin()
     const { tokens, q } = await makePoll(admin)
     const get = () => call(publicR.GET, "GET", `/x?t=${tokens[0]}`, { params: { pollid: "lunch" } })
-    expect((await get()).data.used).toBe(false)
+    const before = (await get()).text
     await submit("lunch", tokens[0], q)
-    expect((await get()).data.used).toBe(true)
+    expect((await get()).text).toBe(before)
+    expect(before).not.toMatch(/used|verified|repeat/i)
   })
 })
 
@@ -469,5 +473,127 @@ describe("poll management", () => {
     const log = (await call(auditR.GET, "GET", "/x", { auth: admin })).text
     expect(log).toContain("settings_changed")
     expect(log).not.toMatch(/password|\d+\.\d+\.\d+\.\d+/i)
+  })
+})
+
+describe("full export and audit trail", () => {
+  it("admin gets every tracked field; editors and anonymous are refused", async () => {
+    const admin = await setupAdmin()
+    const { tokens, q } = await makePoll(admin)
+    await submit("lunch", tokens[0], q, { "user-agent": "iPhone Mobile", "accept-language": "de-DE" })
+    await submit("lunch", tokens[0], q)
+    const r = await call(fullR.GET, "GET", "/x?poll=lunch&format=json", { auth: admin })
+    expect(r.status).toBe(200)
+    const d = r.data as { polls: { links: unknown[]; responses: { link_token: string; status: string; device_class: string; language: string; submitted_at: string; answers: { option: string | null }[] }[]; owner: { username: string } }[]; users: Record<string, unknown>[] }
+    const p = d.polls[0]
+    expect(p.links).toHaveLength(5)
+    expect(p.owner.username).toBe("admin")
+    expect(p.responses.map((x) => x.status)).toEqual(["verified", "unverified"])
+    expect(p.responses[0]).toMatchObject({ link_token: tokens[0], device_class: "mobile", language: "de" })
+    expect(p.responses[0].answers[0].option).toBe("A")
+    expect(JSON.stringify(d)).not.toMatch(/password_hash|\$argon2/)
+    const csv = await call(fullR.GET, "GET", "/x?format=csv", { auth: admin })
+    expect(csv.text.split("\r\n")[0]).toContain("link_token")
+    expect(csv.text).toContain("unverified")
+    expect((await call(fullR.GET, "GET", "/x")).status).toBe(401)
+    const mk = await call(usersR.POST, "POST", "/x", { auth: admin, body: { username: "editor1", role: "editor" } })
+    const l = await call(loginR.POST, "POST", "/x", { body: { username: "editor1", password: mk.data.temporaryPassword } })
+    const ed = authFrom(await call(pwR.POST, "POST", "/x", { auth: authFrom(l), body: { current: mk.data.temporaryPassword, next: "a-long-passphrase-123" } }))
+    expect((await call(fullR.GET, "GET", "/x", { auth: ed })).status).toBe(403)
+    const log = (await call(auditR.GET, "GET", "/x?action=access_denied", { auth: admin })).text
+    expect(log).toContain("access_denied")
+    const exp = (await call(auditR.GET, "GET", "/x?action=full_export", { auth: admin })).data.entries as unknown[]
+    expect(exp.length).toBe(2)
+  })
+
+  it("records failed logins, lockouts and password failures", async () => {
+    const admin = await setupAdmin()
+    for (let i = 0; i < 6; i++) await call(loginR.POST, "POST", "/x", { body: { username: "admin", password: "wrong-password-123" } })
+    await call(pwR.POST, "POST", "/x", { auth: admin, body: { current: "nope-nope-nope-1", next: "another-long-passphrase" } })
+    await call(resultsR.GET, "GET", "/x", { auth: admin, params: { pollid: "none" } })
+    const actions = (db.prepare("SELECT action FROM audit_log").all() as { action: string }[]).map((a) => a.action)
+    expect(actions).toEqual(expect.arrayContaining(["login_failed", "login_blocked_locked", "password_change_failed"]))
+  })
+})
+
+describe("sharing polls", () => {
+  async function editor(admin: Auth, name: string) {
+    const r = await call(usersR.POST, "POST", "/x", { auth: admin, body: { username: name, role: "editor" } })
+    const l = await call(loginR.POST, "POST", "/x", { body: { username: name, password: r.data.temporaryPassword } })
+    const c = await call(pwR.POST, "POST", "/x", { auth: authFrom(l), body: { current: r.data.temporaryPassword, next: "a-long-passphrase-123" } })
+    return { auth: authFrom(c), id: r.data.id as number }
+  }
+  const p = { pollid: "mine" }
+
+  it("view and edit levels grant exactly what they should", async () => {
+    const admin = await setupAdmin()
+    const owner = await editor(admin, "owner1")
+    const viewer = await editor(admin, "viewer1")
+    const editr = await editor(admin, "editor2")
+    const { tokens, q, batchId } = await makePoll(owner.auth, "mine")
+    await submit("mine", tokens[0], q)
+
+    // not shared yet: indistinguishable from missing
+    expect((await call(pollR.GET, "GET", "/x", { auth: viewer.auth, params: p })).status).toBe(404)
+    expect((await call(sharesR.GET, "GET", "/x", { auth: viewer.auth, params: p })).status).toBe(404)
+
+    // only owner/admin can share; unknown or self shares fail
+    expect((await call(sharesR.POST, "POST", "/x", { auth: viewer.auth, params: p, body: { username: "viewer1", permission: "edit" } })).status).toBe(404)
+    expect((await call(sharesR.POST, "POST", "/x", { auth: owner.auth, params: p, body: { username: "nobody", permission: "view" } })).status).toBe(404)
+    expect((await call(sharesR.POST, "POST", "/x", { auth: owner.auth, params: p, body: { username: "owner1", permission: "view" } })).status).toBe(400)
+    expect((await call(sharesR.POST, "POST", "/x", { auth: owner.auth, params: p, body: { username: "viewer1", permission: "root" } })).status).toBe(400)
+    expect((await call(sharesR.POST, "POST", "/x", { auth: owner.auth, params: p, body: { username: "viewer1", permission: "view", extra: 1 } })).status).toBe(400)
+    expect((await call(sharesR.POST, "POST", "/x", { auth: owner.auth, params: p, body: { username: "viewer1", permission: "view" } })).status).toBe(200)
+    expect((await call(sharesR.POST, "POST", "/x", { auth: owner.auth, params: p, body: { username: "editor2", permission: "edit" } })).status).toBe(200)
+
+    // viewer: read only
+    expect((await call(pollR.GET, "GET", "/x", { auth: viewer.auth, params: p })).data.access).toBe("view")
+    expect((await call(resultsR.GET, "GET", "/x", { auth: viewer.auth, params: p })).status).toBe(200)
+    expect((await call(linksR.GET, "GET", "/x", { auth: viewer.auth, params: p })).status).toBe(200)
+    expect((await call(pollR.PATCH, "PATCH", "/x", { auth: viewer.auth, params: p, body: { title: "x" } })).status).toBe(403)
+    expect((await call(linksR.POST, "POST", "/x", { auth: viewer.auth, params: p, body: { count: 1 } })).status).toBe(403)
+    expect((await call(exportR.GET, "GET", "/x?format=txt", { auth: viewer.auth, params: { batchid: String(batchId) } })).status).toBe(403)
+    expect((await call(revokeBatchR.POST, "POST", "/x", { auth: viewer.auth, params: { batchid: String(batchId) } })).status).toBe(403)
+    expect((await call(revokeLinkR.POST, "POST", "/x", { auth: viewer.auth, params: p, body: { token: tokens[1] } })).status).toBe(403)
+    expect((await call(actionR.POST, "POST", "/x", { auth: viewer.auth, params: p, body: { action: "close" } })).status).toBe(403)
+    expect((await call(fullR.GET, "GET", "/x", { auth: viewer.auth })).status).toBe(403)
+    const dup = await call(actionR.POST, "POST", "/x", { auth: viewer.auth, params: p, body: { action: "duplicate", newId: "viewer-copy" } })
+    expect(dup.status).toBe(201)
+    expect((await call(pollR.GET, "GET", "/x", { auth: viewer.auth, params: { pollid: "viewer-copy" } })).data.access).toBe("owner")
+
+    // editor: can work on it, cannot trash, delete or share
+    expect((await call(pollR.PATCH, "PATCH", "/x", { auth: editr.auth, params: p, body: { title: "Renamed" } })).status).toBe(200)
+    expect((await call(linksR.POST, "POST", "/x", { auth: editr.auth, params: p, body: { count: 2 } })).status).toBe(201)
+    expect((await call(actionR.POST, "POST", "/x", { auth: editr.auth, params: p, body: { action: "close" } })).status).toBe(200)
+    expect((await call(actionR.POST, "POST", "/x", { auth: editr.auth, params: p, body: { action: "trash" } })).status).toBe(403)
+    expect((await call(pollR.DELETE, "DELETE", "/x", { auth: editr.auth, params: p, body: { confirm: "mine" } })).status).toBe(403)
+    expect((await call(sharesR.POST, "POST", "/x", { auth: editr.auth, params: p, body: { username: "viewer1", permission: "edit" } })).status).toBe(403)
+    expect((await call(sharesR.DELETE, "DELETE", "/x", { auth: editr.auth, params: p, body: { userId: viewer.id } })).status).toBe(403)
+
+    // listing and dashboard include shared polls
+    const ids = (await call(pollsR.GET, "GET", "/x", { auth: viewer.auth })).data.polls as { id: string; access: string }[]
+    expect(ids.find((x) => x.id === "mine")?.access).toBe("view")
+
+    // public respondents never see any of this, and the audit trail records it
+    expect((await call(auditR.GET, "GET", "/x?action=share", { auth: admin })).data.entries as unknown[]).toHaveLength(2)
+
+    // viewer leaves; access is gone
+    expect((await call(sharesR.DELETE, "DELETE", "/x", { auth: viewer.auth, params: p, body: { userId: viewer.id } })).status).toBe(200)
+    expect((await call(pollR.GET, "GET", "/x", { auth: viewer.auth, params: p })).status).toBe(404)
+    // owner removes editor; changing level works too
+    expect((await call(sharesR.DELETE, "DELETE", "/x", { auth: owner.auth, params: p, body: { userId: editr.id } })).status).toBe(200)
+    expect((await call(pollR.PATCH, "PATCH", "/x", { auth: editr.auth, params: p, body: { title: "x" } })).status).toBe(404)
+  })
+
+  it("deleting a user removes their shares, and the full export lists shares", async () => {
+    const admin = await setupAdmin()
+    const owner = await editor(admin, "owner1")
+    const other = await editor(admin, "other1")
+    await makePoll(owner.auth, "mine")
+    await call(sharesR.POST, "POST", "/x", { auth: owner.auth, params: p, body: { username: "other1", permission: "view" } })
+    const exp = await call(fullR.GET, "GET", "/x?poll=mine", { auth: admin })
+    expect(JSON.stringify(exp.data)).toContain("other1")
+    await call(userR.DELETE, "DELETE", "/x", { auth: admin, params: { id: String(other.id) } })
+    expect(db.prepare("SELECT COUNT(*) AS n FROM poll_shares").get()).toEqual({ n: 0 })
   })
 })

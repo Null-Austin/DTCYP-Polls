@@ -6,15 +6,15 @@ import { audit } from "@/lib/server/audit"
 type P = { pollid: string }
 
 export const GET = route<P>({ access: "user" }, ({ db, user, params }) => {
-  return json(pollDto(db, ownedPoll(db, user, params.pollid, { includeDeleted: true })))
+  return json(pollDto(db, ownedPoll(db, user, params.pollid, { includeDeleted: true, need: "view" })))
 })
 
 export const PATCH = route<P>({ access: "user" }, async ({ req, db, user, params }) => {
   const body = await readJson(req)
   exact(body, ["title", "description", "status", "requireVerification", "opensAt", "closesAt", "questions"])
-  ownedPoll(db, user, params.pollid)
+  ownedPoll(db, user, params.pollid, { need: "edit" })
   db.transaction(() => {
-    const p = ownedPoll(db, user, params.pollid)
+    const p = ownedPoll(db, user, params.pollid, { need: "edit" })
     const title = body.title !== undefined ? str(body.title, 200, { min: 1 }) : p.title
     const description = body.description !== undefined ? str(body.description, 2000, { optional: true }) : p.description
     let status = p.status
@@ -35,9 +35,13 @@ export const PATCH = route<P>({ access: "user" }, async ({ req, db, user, params
       title, description, status, rv, opens, closes, p.id,
     )
     touch(db, p.id)
-    audit(db, user.id, "poll_updated", { type: "poll", id: p.id }, { status, structure: body.questions !== undefined })
+    audit(db, user.id, "poll_updated", { type: "poll", id: p.id }, {
+      fields: Object.keys(body).join(","),
+      status,
+      from_status: p.status,
+    })
   }).immediate()
-  return json(pollDto(db, ownedPoll(db, user, params.pollid)))
+  return json(pollDto(db, ownedPoll(db, user, params.pollid, { need: "edit" })))
 })
 
 // Permanent delete: caller must type the slug.

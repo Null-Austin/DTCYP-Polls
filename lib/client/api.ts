@@ -43,3 +43,6 @@ export async function api<T = Record<string, unknown>>(
 export const errMsg = (e: unknown) => (e instanceof Error ? e.message : "Something went wrong")
 
 export const fmtDate = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleString() : "-")
+
+export const FULL_WARNING =
+  "This file contains every tracked response field, all link tokens (which act as access credentials) and user names. Store it securely. Continue?"

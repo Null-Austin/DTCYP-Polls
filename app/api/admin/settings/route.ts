@@ -38,7 +38,7 @@ export const PATCH = route({ access: "admin" }, async ({ req, db, user }) => {
         setSetting(db, "public_base_url", u.origin + u.pathname.replace(/\/+$/, ""))
       } else setSetting(db, "public_base_url", "")
     }
-    audit(db, user.id, "settings_changed", { type: "settings", id: "app" })
+    audit(db, user.id, "settings_changed", { type: "settings", id: "app" }, { keys: Object.keys(body).join(",") })
   })()
   return json(view(db))
 })

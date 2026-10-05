@@ -16,8 +16,8 @@ export const GET = route({ access: "user" }, ({ db, user, url }) => {
   const where: string[] = []
   const args: (string | number)[] = []
   if (user.role !== "admin") {
-    where.push("p.owner_id = ?")
-    args.push(user.id)
+    where.push("(p.owner_id = ? OR EXISTS (SELECT 1 FROM poll_shares s WHERE s.poll_id = p.id AND s.user_id = ?))")
+    args.push(user.id, user.id)
   } else if (sp.get("owner")) {
     where.push("p.owner_id = ?")
     args.push(Number(sp.get("owner")) || 0)
@@ -46,12 +46,14 @@ export const GET = route({ access: "user" }, ({ db, user, url }) => {
   const rows = db
     .prepare(
       `SELECT p.id, p.title, p.status, p.owner_id, u.username AS owner, p.created_at, p.archived_at, p.deleted_at,
+        CASE WHEN ? = 'admin' OR p.owner_id = ? THEN 'owner'
+          ELSE COALESCE((SELECT permission FROM poll_shares s WHERE s.poll_id = p.id AND s.user_id = ?), 'view') END AS access,
         (SELECT COUNT(*) FROM responses r WHERE r.poll_id = p.id) AS responses,
         (SELECT MAX(submitted_at) FROM responses r WHERE r.poll_id = p.id) AS last_response
        FROM polls p JOIN users u ON u.id = p.owner_id
        WHERE ${where.join(" AND ")} ORDER BY ${order} ${dir} LIMIT 500`,
     )
-    .all(...args)
+    .all(user.role, user.id, user.id, ...args)
   return json({ polls: rows })
 })
 

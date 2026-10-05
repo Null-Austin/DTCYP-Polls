@@ -11,7 +11,11 @@ export const POST = route({ access: "public" }, async ({ req, db }) => {
   exact(body, ["username", "password"])
   const username = typeof body.username === "string" ? body.username.slice(0, 100) : ""
   const password = typeof body.password === "string" ? body.password.slice(0, 256) : ""
-  if (isLocked(username)) throw new HttpError(429, "Too many attempts. Try again later.")
+  if (isLocked(username)) {
+    const u = db.prepare("SELECT id FROM users WHERE username = ?").get(username) as { id: number } | undefined
+    audit(db, null, "login_blocked_locked", u ? { type: "user", id: u.id } : undefined)
+    throw new HttpError(429, "Too many attempts. Try again later.")
+  }
 
   const row = db
     .prepare("SELECT id, username, email, role, must_change_password, disabled_at, password_hash FROM users WHERE username = ?")

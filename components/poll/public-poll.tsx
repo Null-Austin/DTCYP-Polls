@@ -5,7 +5,7 @@ import PollForm, { type PollQuestion } from "@/components/poll/poll-form"
 import PollLogo from "@/components/poll/logo"
 import { api, ApiError } from "@/lib/client/api"
 
-type View = { title: string; description: string; state: "open" | "closed" | "not_open"; used: boolean; questions: PollQuestion[] }
+type View = { title: string; description: string; state: "open" | "closed" | "not_open"; questions: PollQuestion[] }
 type Phase = { k: "loading" } | { k: "invalid" } | { k: "error"; msg: string } | { k: "ready"; v: View } | { k: "done" }
 
 export default function PublicPoll({ pollId, token }: { pollId: string; token: string }) {
@@ -47,7 +47,6 @@ export default function PublicPoll({ pollId, token }: { pollId: string; token: s
         title={v.title}
         description={v.description}
         questions={v.questions}
-        notice={v.used ? "This link has already been used. Your answer will be saved but marked as a repeat." : undefined}
         onSubmit={async (answers) => {
           try {
             await api(`/api/polls/${encodeURIComponent(pollId)}/responses`, { method: "POST", body: { token, answers } })
