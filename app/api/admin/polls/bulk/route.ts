@@ -4,7 +4,7 @@ import { applyAction } from "@/lib/server/poll-actions"
 
 const BULK = ["close", "archive", "trash"] as const
 
-export const POST = route({ access: "user" }, async ({ req, db, user }) => {
+export const POST = route({ perm: ["polls:publish", "polls:delete"] }, async ({ req, db, user }) => {
   const body = await readJson(req)
   exact(body, ["ids", "action"])
   if (!BULK.includes(body.action as (typeof BULK)[number])) throw new HttpError(400, "Unknown action")

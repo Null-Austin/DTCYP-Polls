@@ -148,7 +148,7 @@ export function findLinkedPoll(db: DB, pollId: string, token: unknown): PollRow 
   const p = db
     .prepare(
       `SELECT p.* FROM polls p JOIN links l ON l.poll_id = p.id
-       WHERE p.id = ? AND l.token = ? AND l.revoked_at IS NULL AND p.deleted_at IS NULL`,
+      WHERE p.id = ? AND l.token = ? AND l.revoked_at IS NULL AND l.enabled = 1 AND p.deleted_at IS NULL`,
     )
     .get(pollId, token) as PollRow | undefined
   return p ?? null

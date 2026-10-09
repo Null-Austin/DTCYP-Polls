@@ -15,14 +15,15 @@ export function baseUrl(db: DB): string {
 export const MAX_BATCH = 10_000
 const MAX_LINKS_PER_POLL = 200_000
 
-export function createBatch(db: DB, pollId: string, count: number, label: string): number {
+export function createBatch(db: DB, pollId: string, count: number, label: string, titles: string[] = []): number {
   return db.transaction(() => {
     const have = (db.prepare("SELECT COUNT(*) AS n FROM links WHERE poll_id = ?").get(pollId) as { n: number }).n
     if (have + count > MAX_LINKS_PER_POLL) throw new HttpError(400, "Link limit for this poll reached")
     const now = nowIso()
     const batchId = Number(db.prepare("INSERT INTO link_batches (poll_id, label, count, created_at) VALUES (?,?,?,?)").run(pollId, label, count, now).lastInsertRowid)
-    const ins = db.prepare("INSERT INTO links (token, poll_id, batch_id, created_at) VALUES (?,?,?,?)")
-    for (let i = 0; i < count; i++) ins.run(randomBytes(18).toString("base64url"), pollId, batchId, now)
+    const groupId = Number(db.prepare("INSERT INTO distribution_groups (poll_id, name, position, created_at) VALUES (?,?,?,?)").run(pollId, label, batchId, now).lastInsertRowid)
+    const ins = db.prepare("INSERT INTO links (token, poll_id, batch_id, created_at, group_id, display_title) VALUES (?,?,?,?,?,?)")
+    for (let i = 0; i < count; i++) ins.run(randomBytes(18).toString("base64url"), pollId, batchId, now, groupId, titles[i] ?? "")
     return batchId
   }).immediate()
 }

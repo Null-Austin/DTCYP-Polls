@@ -1,9 +1,9 @@
 import UsersPage from "@/components/admin/users-page"
-import { requireAdminPage } from "@/lib/server/page-auth"
+import { requirePermissionPage } from "@/lib/server/page-auth"
 
 export const metadata = { title: "Users" }
 
 export default async function Page() {
-  await requireAdminPage()
-  return <UsersPage />
+  const s = await requirePermissionPage("users:read")
+  return <UsersPage isRoot={s.user.isRoot} canAssign={s.user.isRoot || s.user.grants.some((g) => g.permission === "role:assign")} />
 }

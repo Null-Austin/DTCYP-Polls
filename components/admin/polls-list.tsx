@@ -7,10 +7,13 @@ import { useLoad } from "@/lib/client/use-load"
 import { api, errMsg, fmtDate, FULL_WARNING } from "@/lib/client/api"
 import { showAlert } from "@/lib/alerts"
 
-type Row = { id: string; title: string; status: string; owner_id: number; owner: string; access: "view" | "edit" | "owner"; created_at: string; archived_at: string | null; deleted_at: string | null; responses: number; last_response: string | null }
+type Row = { id: string; title: string; status: string; owner_id: number; owner: string; access: "view" | "edit" | "owner"; created_at: string; archived_at: string | null; deleted_at: string | null; responses: number | null; last_response: string | null }
 type User = { id: number; username: string }
 
-export default function PollsList({ isAdmin }: { isAdmin: boolean }) {
+export default function PollsList({ permissions, isRoot }: { permissions: string[]; isRoot: boolean }) {
+  const can = (p: string) => isRoot || permissions.includes(p)
+  const canEdit = (access: Row["access"]) => access === "owner" || access === "edit"
+
   const router = useRouter()
   const [q, setQ] = useState("")
   const [status, setStatus] = useState("")
@@ -21,7 +24,7 @@ export default function PollsList({ isAdmin }: { isAdmin: boolean }) {
   const [err, setErr] = useState("")
   const qs = new URLSearchParams({ q, status, owner, sort, dir }).toString()
   const { data, error, reload } = useLoad<{ polls: Row[] }>(`/api/admin/polls?${qs}`)
-  const users = useLoad<{ users: User[] }>(isAdmin ? "/api/admin/users" : null)
+  const users = useLoad<{ users: User[] }>(can("users:read") ? "/api/admin/users" : null)
 
   async function act(id: string, action: string) {
     try {
@@ -83,45 +86,39 @@ export default function PollsList({ isAdmin }: { isAdmin: boolean }) {
     <>
       <h1>Polls</h1>
       <p className="admin__sub">Create, schedule and manage polls.</p>
-      <form className="panel row" onSubmit={create}>
+      {can("polls:create") && <form className="panel row" onSubmit={create}>
         <label className="field grow">Title<input name="title" required maxLength={200} placeholder="Team lunch vote" /></label>
         <label className="field grow">Poll id (permanent)<input name="id" required pattern="[a-z0-9][a-z0-9\-]{1,59}" placeholder="lunch-vote" /></label>
         <button className="btn btn--primary">Create poll</button>
-      </form>
+      </form>}
       <div className="row" style={{ marginBottom: 12 }}>
         <input className="grow" aria-label="Search polls" placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} />
         <select aria-label="Status" value={status} onChange={(e) => setStatus(e.target.value)} style={{ width: 140 }}>
           <option value="">Active</option>
           {["draft", "open", "closed", "archived", "trash"].map((s) => <option key={s}>{s}</option>)}
         </select>
-        {isAdmin && (
+        {isRoot && (
           <select aria-label="Owner" value={owner} onChange={(e) => setOwner(e.target.value)} style={{ width: 160 }}>
             <option value="">All owners</option>
             {users.data?.users.map((u) => <option key={u.id} value={u.id}>{u.username}</option>)}
           </select>
         )}
-        {isAdmin && (
+        {can("admin:export") && (
           <>
-            <a className="btn" href="/api/admin/export?format=json" onClick={(e) => { if (!confirm(FULL_WARNING)) e.preventDefault() }}>Export everything (JSON)</a>
-            <a className="btn" href="/api/admin/export?format=csv" onClick={(e) => { if (!confirm(FULL_WARNING)) e.preventDefault() }}>CSV</a>
+            <a className="btn" href="/api/admin/export?format=zip" onClick={(e) => { if (!confirm(FULL_WARNING)) e.preventDefault() }}>Export everything (ZIP)</a>
           </>
         )}
       </div>
       {(error || err) && <p className="err" role="alert">{error || err}</p>}
-      {sel.length > 0 && (
-        <div className="row" style={{ marginBottom: 12 }}>
-          <span className="muted">{sel.length} selected</span>
-          <button className="btn btn--sm" onClick={() => bulk("close")}>Close</button>
-          <button className="btn btn--sm" onClick={() => bulk("archive")}>Archive</button>
-          <button className="btn btn--sm btn--danger" onClick={() => bulk("trash")}>Move to trash</button>
-        </div>
-      )}
+      {sel.length > 0 && can("polls:publish") && <button className="btn btn--sm" onClick={() => bulk("close")}>Close</button>}
+      {sel.length > 0 && can("polls:publish") && <button className="btn btn--sm" onClick={() => bulk("archive")}>Archive</button>}
+      {sel.length > 0 && can("polls:publish") && <button className="btn btn--sm btn--danger" onClick={() => bulk("trash")}>Move to trash</button>}
       <div className="table-wrap">
         <table className="tbl">
           <thead>
             <tr>
               <th><input type="checkbox" aria-label="Select all" checked={rows.length > 0 && sel.length === rows.length} onChange={(e) => setSel(e.target.checked ? rows.map((r) => r.id) : [])} /></th>
-              {th("title", "Poll")}<th>Status</th>{isAdmin && <th>Owner</th>}{th("created", "Created")}{th("responses", "Responses")}{th("last_response", "Last response")}<th />
+              {th("title", "Poll")}<th>Status</th>{isRoot && <th>Owner</th>}{th("created", "Created")}{th("responses", "Responses")}{th("last_response", "Last response")}<th />
             </tr>
           </thead>
           <tbody>
@@ -130,28 +127,26 @@ export default function PollsList({ isAdmin }: { isAdmin: boolean }) {
                 <td><input type="checkbox" aria-label={`Select ${p.title}`} checked={sel.includes(p.id)} onChange={(e) => setSel(e.target.checked ? [...sel, p.id] : sel.filter((x) => x !== p.id))} /></td>
                 <td><strong>{p.title}</strong><div className="mono muted">{p.id}{p.access !== "owner" && ` · shared by ${p.owner} (${p.access})`}</div></td>
                 <td><span className="chip">{p.deleted_at ? "trash" : p.archived_at ? "archived" : p.status}</span></td>
-                {isAdmin && <td>{p.owner}</td>}
+                {isRoot && <td>{p.owner}</td>}
                 <td>{fmtDate(p.created_at)}</td>
-                <td>{p.responses}</td>
+                <td>{p.responses ?? "-"}</td>
                 <td>{fmtDate(p.last_response)}</td>
                 <td>
                   <div className="actions">
                     {trash ? (
-                      <>
+                      canEdit(p.access) ? <>
                         <button className="btn btn--sm" onClick={() => act(p.id, "restore")}>Restore</button>
                         <button className="btn btn--sm btn--danger" onClick={() => destroy(p.id)}>Delete permanently</button>
-                      </>
+                      </> : <span className="muted">View only</span>
                     ) : (
                       <>
                         <Link className="btn btn--sm" href={`/admin/${p.id}/edit`}>{p.access === "view" ? "View" : "Edit"}</Link>
-                        <Link className="btn btn--sm" href={`/admin/${p.id}/links`}>Links</Link>
+                        {p.access !== "view" && <Link className="btn btn--sm" href={`/admin/${p.id}/links`}>Links</Link>}
                         <Link className="btn btn--sm" href={`/admin/${p.id}/results`}>Results</Link>
-                        <Link className="btn btn--sm" href={`/admin/${p.id}/share`}>Share</Link>
-                        <button className="btn btn--sm" onClick={() => dup(p.id)}>Duplicate</button>
-                        {p.access !== "view" && (<>
-                        {p.status === "open" ? <button className="btn btn--sm" onClick={() => act(p.id, "close")}>Close</button> : <button className="btn btn--sm" onClick={() => act(p.id, "reopen")}>Reopen</button>}
-                        {p.archived_at ? <button className="btn btn--sm" onClick={() => act(p.id, "unarchive")}>Unarchive</button> : <button className="btn btn--sm" onClick={() => act(p.id, "archive")}>Archive</button>}
-                        </>)}
+                        {p.access === "owner" && <Link className="btn btn--sm" href={`/admin/${p.id}/share`}>Share</Link>}
+                        {can("polls:create") && <button className="btn btn--sm" onClick={() => dup(p.id)}>Duplicate</button>}
+                        {canEdit(p.access) && (p.status === "open" ? <button className="btn btn--sm" onClick={() => act(p.id, "close")}>Close</button> : <button className="btn btn--sm" onClick={() => act(p.id, "reopen")}>Reopen</button>)}
+                        {canEdit(p.access) && (p.archived_at ? <button className="btn btn--sm" onClick={() => act(p.id, "unarchive")}>Unarchive</button> : <button className="btn btn--sm" onClick={() => act(p.id, "archive")}>Archive</button>)}
                         {p.access === "owner" && <button className="btn btn--sm btn--danger" onClick={() => act(p.id, "trash")}>Trash</button>}
                       </>
                     )}

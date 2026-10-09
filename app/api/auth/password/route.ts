@@ -4,10 +4,11 @@ import { destroyUserSessions, hashPassword, validatePassword, verifyPassword } f
 import { startSession } from "@/lib/server/accounts"
 import { audit } from "@/lib/server/audit"
 
-export const POST = route({ access: "user", allowMustChange: true }, async ({ req, db, user }) => {
+export const POST = route({ access: "session", allowMustChange: true }, async ({ req, db, user }) => {
   if (!rateLimit(`pw:${user.id}`, 10, 15 * 60_000)) throw new HttpError(429, "Too many attempts")
   const body = await readJson(req, 4096)
   exact(body, ["current", "next"])
+  if (user.kind === "bot") throw new HttpError(403, "Bots cannot change passwords")
   const row = db.prepare("SELECT password_hash FROM users WHERE id = ?").get(user.id) as { password_hash: string }
   if (typeof body.current !== "string" || !(await verifyPassword(row.password_hash, body.current))) {
     audit(db, user.id, "password_change_failed", { type: "user", id: user.id })

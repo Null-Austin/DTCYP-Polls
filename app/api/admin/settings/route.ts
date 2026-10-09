@@ -15,9 +15,9 @@ function view(db: Parameters<typeof timeouts>[0]) {
   }
 }
 
-export const GET = route({ access: "admin" }, ({ db }) => json(view(db)))
+export const GET = route({ perm: "admin:settings" }, ({ db }) => json(view(db)))
 
-export const PATCH = route({ access: "admin" }, async ({ req, db, user }) => {
+export const PATCH = route({ perm: "admin:settings" }, async ({ req, db, user }) => {
   const body = await readJson(req, 2048)
   exact(body, ["retentionDays", "idleMinutes", "maxHours", "publicBaseUrl"])
   db.transaction(() => {

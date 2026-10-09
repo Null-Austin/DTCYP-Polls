@@ -1,45 +1,54 @@
-import { route } from "@/lib/server/authz"
+import { route, requireHigherLevelThan, requireOn } from "@/lib/server/authz"
 import { exact, HttpError, json, readJson } from "@/lib/server/http"
 import { destroyUserSessions } from "@/lib/server/auth"
 import { audit } from "@/lib/server/audit"
-import { nowIso, type DB } from "@/lib/server/db"
+import { type DB } from "@/lib/server/db"
+import { canGrant, canManageRole } from "@/lib/server/rbac"
+import { isPermission } from "@/lib/server/permissions"
 
 type P = { id: string }
-type Target = { id: number; role: string; disabled_at: string | null }
+type Target = { id: number; is_root: number; disabled_at: string | null }
 
 function target(db: DB, raw: string): Target {
   const id = Number(raw)
-  const t = Number.isInteger(id) ? (db.prepare("SELECT id, role, disabled_at FROM users WHERE id = ?").get(id) as Target | undefined) : undefined
+  const t = Number.isInteger(id) ? (db.prepare("SELECT id, is_root, disabled_at FROM users WHERE id = ?").get(id) as Target | undefined) : undefined
   if (!t) throw new HttpError(404, "Not found")
   return t
 }
 
-// Must run inside a write transaction. Blocks any change that would leave zero active admins.
-function assertAnotherAdmin(db: DB, t: Target) {
-  if (t.role !== "admin" || t.disabled_at) return
-  const n = (db.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND disabled_at IS NULL AND id != ?").get(t.id) as { n: number }).n
-  if (n < 1) throw new HttpError(409, "The last active admin cannot be removed, disabled or demoted")
-}
-
-export const PATCH = route<P>({ access: "admin" }, async ({ req, db, user, params }) => {
+export const PATCH = route<P>({ perm: ["users:edit", "users:disable", "users:delete", "role:assign"] }, async ({ req, db, user, params }) => {
   const body = await readJson(req, 512)
-  exact(body, ["role", "disabled"])
+  exact(body, ["roleIds", "disabled"])
   db.transaction(() => {
     const t = target(db, params.id)
-    if (body.role !== undefined) {
-      if (body.role !== "admin" && body.role !== "editor") throw new HttpError(400, "Invalid role")
-      if (body.role !== t.role) {
-        if (body.role === "editor") assertAnotherAdmin(db, t)
-        db.prepare("UPDATE users SET role = ? WHERE id = ?").run(body.role, t.id)
-        destroyUserSessions(db, t.id)
-        audit(db, user.id, "user_role_changed", { type: "user", id: t.id }, { role: body.role })
+    if (body.roleIds !== undefined) {
+      requireOn(db, user, "role:assign")
+      requireHigherLevelThan(db, user, t.id)
+      if (!Array.isArray(body.roleIds) || body.roleIds.length < 1 || body.roleIds.length > 20 || body.roleIds.some((x) => !Number.isInteger(Number(x)))) {
+        throw new HttpError(400, "Choose one or more roles")
       }
+      const next = body.roleIds.map((x) => db.prepare("SELECT * FROM roles WHERE id = ?").get(Number(x)) as { id: number; level: number; is_root: number } | undefined)
+      if (next.some((r) => !r) || next.some((r) => r!.is_root)) throw new HttpError(400, "Rootadmin cannot be assigned")
+      const current = db.prepare("SELECT r.* FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE ur.user_id = ?").all(t.id) as { id: number; level: number; is_root: number }[]
+      for (const r of [...current, ...next as { id: number; level: number; is_root: number }[]]) {
+        if (!canManageRole(user, r)) throw new HttpError(403, "You cannot manage a role at or above your level")
+        const grants = db.prepare("SELECT permission, scope FROM role_permissions WHERE role_id = ?").all(r.id) as { permission: string; scope: string }[]
+        if (grants.some((g) => !isPermission(g.permission) || !canGrant(user, g.permission, g.scope))) throw new HttpError(403, "You cannot grant permissions you do not hold")
+      }
+      db.prepare("DELETE FROM user_roles WHERE user_id = ?").run(t.id)
+      const insert = db.prepare("INSERT INTO user_roles (user_id, role_id) VALUES (?,?)")
+      for (const r of next as { id: number }[]) insert.run(t.id, r.id)
+      const legacyRole = (next as { id: number }[]).some((r) => (db.prepare("SELECT name FROM roles WHERE id = ?").get(r.id) as { name: string }).name === "Admin") ? "admin" : "editor"
+      db.prepare("UPDATE users SET role = ? WHERE id = ?").run(legacyRole, t.id)
+      destroyUserSessions(db, t.id)
+      audit(db, user.id, "user_roles_changed", { type: "user", id: t.id }, { role_count: next.length })
     }
     if (body.disabled !== undefined) {
+      requireOn(db, user, "users:disable")
+      requireHigherLevelThan(db, user, t.id)
       if (typeof body.disabled !== "boolean") throw new HttpError(400, "Invalid input")
       if (body.disabled) {
-        assertAnotherAdmin(db, t)
-        db.prepare("UPDATE users SET disabled_at = ? WHERE id = ?").run(nowIso(), t.id)
+        db.prepare("UPDATE users SET disabled_at = ? WHERE id = ?").run(new Date().toISOString(), t.id)
         destroyUserSessions(db, t.id)
       } else db.prepare("UPDATE users SET disabled_at = NULL WHERE id = ?").run(t.id)
       audit(db, user.id, body.disabled ? "user_disabled" : "user_enabled", { type: "user", id: t.id })
@@ -48,13 +57,12 @@ export const PATCH = route<P>({ access: "admin" }, async ({ req, db, user, param
   return json({ ok: true })
 })
 
-export const DELETE = route<P>({ access: "admin" }, ({ db, user, params }) => {
+export const DELETE = route<P>({ perm: "users:delete" }, ({ db, user, params }) => {
   db.transaction(() => {
     const t = target(db, params.id)
-    assertAnotherAdmin(db, t)
-    // Polls are handed to the acting admin rather than deleted with the account.
-    const heir = t.id === user.id ? (db.prepare("SELECT id FROM users WHERE role = 'admin' AND disabled_at IS NULL AND id != ? LIMIT 1").get(t.id) as { id: number }).id : user.id
-    db.prepare("UPDATE polls SET owner_id = ? WHERE owner_id = ?").run(heir, t.id)
+    requireHigherLevelThan(db, user, t.id)
+    const owned = (db.prepare("SELECT COUNT(*) AS n FROM polls WHERE owner_id = ?").get(t.id) as { n: number }).n
+    if (owned) throw new HttpError(409, "Transfer or delete this account's polls before deleting the account")
     db.prepare("DELETE FROM users WHERE id = ?").run(t.id)
     audit(db, user.id, "user_deleted", { type: "user", id: t.id })
   }).immediate()

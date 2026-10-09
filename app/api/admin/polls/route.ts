@@ -1,4 +1,5 @@
-import { route } from "@/lib/server/authz"
+import { route, requireOn } from "@/lib/server/authz"
+import { accessLevel, can, visiblePolls } from "@/lib/server/rbac"
 import { exact, HttpError, json, readJson, str } from "@/lib/server/http"
 import { cleanSlug } from "@/lib/server/polls"
 import { audit } from "@/lib/server/audit"
@@ -11,14 +12,15 @@ const SORTS: Record<string, string> = {
   responses: "responses",
 }
 
-export const GET = route({ access: "user" }, ({ db, user, url }) => {
+export const GET = route({ perm: ["polls:read", "polls:create"] }, ({ db, user, url }) => {
+  requireOn(db, user, "polls:read")
   const sp = url.searchParams
   const where: string[] = []
   const args: (string | number)[] = []
-  if (user.role !== "admin") {
-    where.push("(p.owner_id = ? OR EXISTS (SELECT 1 FROM poll_shares s WHERE s.poll_id = p.id AND s.user_id = ?))")
-    args.push(user.id, user.id)
-  } else if (sp.get("owner")) {
+  const visible = visiblePolls(db, user)
+  where.push(visible.sql)
+  args.push(...visible.args)
+  if (user.isRoot && sp.get("owner")) {
     where.push("p.owner_id = ?")
     args.push(Number(sp.get("owner")) || 0)
   }
@@ -41,23 +43,27 @@ export const GET = route({ access: "user" }, ({ db, user, url }) => {
     const like = `%${q.replace(/[\\%_]/g, "\\$&")}%`
     args.push(like, like)
   }
-  const order = SORTS[sp.get("sort") ?? ""] ?? SORTS.created
+  const requestedSort = sp.get("sort") ?? ""
+  const globalResponseRead = user.isRoot || user.grants.some((g) => g.permission === "responses:read" && g.scope === "")
+  const order = !globalResponseRead && ["responses", "last_response"].includes(requestedSort) ? SORTS.created : SORTS[requestedSort] ?? SORTS.created
   const dir = sp.get("dir") === "asc" ? "ASC" : "DESC"
   const rows = db
     .prepare(
       `SELECT p.id, p.title, p.status, p.owner_id, u.username AS owner, p.created_at, p.archived_at, p.deleted_at,
-        CASE WHEN ? = 'admin' OR p.owner_id = ? THEN 'owner'
-          ELSE COALESCE((SELECT permission FROM poll_shares s WHERE s.poll_id = p.id AND s.user_id = ?), 'view') END AS access,
         (SELECT COUNT(*) FROM responses r WHERE r.poll_id = p.id) AS responses,
         (SELECT MAX(submitted_at) FROM responses r WHERE r.poll_id = p.id) AS last_response
        FROM polls p JOIN users u ON u.id = p.owner_id
        WHERE ${where.join(" AND ")} ORDER BY ${order} ${dir} LIMIT 500`,
     )
-    .all(user.role, user.id, user.id, ...args)
-  return json({ polls: rows })
+    .all(...args) as { id: string; owner_id: number; [key: string]: unknown }[]
+  return json({ polls: rows.map((p) => {
+    const mayReadResponses = can(db, user, "responses:read", { pollId: p.id, ownerId: p.owner_id })
+    return { ...p, access: accessLevel(db, user, p), responses: mayReadResponses ? p.responses : null, last_response: mayReadResponses ? p.last_response : null }
+  }) })
 })
 
-export const POST = route({ access: "user" }, async ({ req, db, user }) => {
+export const POST = route({ perm: ["polls:read", "polls:create"] }, async ({ req, db, user }) => {
+  requireOn(db, user, "polls:create")
   const body = await readJson(req, 4096)
   exact(body, ["id", "title", "description"])
   const id = cleanSlug(body.id)

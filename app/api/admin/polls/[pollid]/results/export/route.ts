@@ -3,8 +3,8 @@ import { csvCell, download } from "@/lib/server/http"
 import { pollResults } from "@/lib/server/results"
 import { audit } from "@/lib/server/audit"
 
-export const GET = route<{ pollid: string }>({ access: "user" }, ({ db, user, params }) => {
-  const poll = ownedPoll(db, user, params.pollid, { includeDeleted: true, need: "view" })
+export const GET = route<{ pollid: string }>({ perm: "responses:export" }, ({ db, user, params }) => {
+  const poll = ownedPoll(db, user, params.pollid, { includeDeleted: true, need: "polls:read" })
   const res = pollResults(db, poll.id)
   const lines = ["question,type,answer,verified,unverified"]
   for (const q of res.questions) {

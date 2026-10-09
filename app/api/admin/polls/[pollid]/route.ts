@@ -5,16 +5,16 @@ import { audit } from "@/lib/server/audit"
 
 type P = { pollid: string }
 
-export const GET = route<P>({ access: "user" }, ({ db, user, params }) => {
-  return json(pollDto(db, ownedPoll(db, user, params.pollid, { includeDeleted: true, need: "view" })))
+export const GET = route<P>({ perm: ["polls:read", "polls:edit", "polls:delete"] }, ({ db, user, params }) => {
+  return json(pollDto(db, ownedPoll(db, user, params.pollid, { includeDeleted: true, need: "polls:read" })))
 })
 
-export const PATCH = route<P>({ access: "user" }, async ({ req, db, user, params }) => {
+export const PATCH = route<P>({ perm: ["polls:read", "polls:edit", "polls:delete"] }, async ({ req, db, user, params }) => {
   const body = await readJson(req)
   exact(body, ["title", "description", "status", "requireVerification", "opensAt", "closesAt", "questions"])
-  ownedPoll(db, user, params.pollid, { need: "edit" })
+  ownedPoll(db, user, params.pollid, { need: "polls:edit" })
   db.transaction(() => {
-    const p = ownedPoll(db, user, params.pollid, { need: "edit" })
+    const p = ownedPoll(db, user, params.pollid, { need: "polls:edit" })
     const title = body.title !== undefined ? str(body.title, 200, { min: 1 }) : p.title
     const description = body.description !== undefined ? str(body.description, 2000, { optional: true }) : p.description
     let status = p.status
@@ -41,14 +41,14 @@ export const PATCH = route<P>({ access: "user" }, async ({ req, db, user, params
       from_status: p.status,
     })
   }).immediate()
-  return json(pollDto(db, ownedPoll(db, user, params.pollid, { need: "edit" })))
+  return json(pollDto(db, ownedPoll(db, user, params.pollid, { need: "polls:edit" })))
 })
 
 // Permanent delete: caller must type the slug.
-export const DELETE = route<P>({ access: "user" }, async ({ req, db, user, params }) => {
+export const DELETE = route<P>({ perm: ["polls:read", "polls:edit", "polls:delete"] }, async ({ req, db, user, params }) => {
   const body = await readJson(req, 1024)
   exact(body, ["confirm"])
-  const p = ownedPoll(db, user, params.pollid, { includeDeleted: true })
+  const p = ownedPoll(db, user, params.pollid, { includeDeleted: true, need: "polls:delete" })
   if (body.confirm !== p.id) throw new HttpError(400, "Type the poll id to confirm")
   db.transaction(() => {
     db.prepare("DELETE FROM polls WHERE id = ?").run(p.id)

@@ -99,7 +99,7 @@ export default function PollEditor({ pollId }: { pollId: string }) {
     <>
       <h1>Edit poll</h1>
       <p className="admin__sub mono">{pollId}</p>
-      <PollTabs pollId={pollId} current="edit" />
+      <PollTabs pollId={pollId} current="edit" canLinks={data.access !== "view"} canResults canShare={data.access === "owner"} />
       <div className="editor">
         <div>
           {readOnly && <p className="pf__notice">This poll is shared with you as view-only.</p>}

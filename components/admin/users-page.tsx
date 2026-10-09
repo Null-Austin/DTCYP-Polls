@@ -4,10 +4,13 @@ import { useState } from "react"
 import { useLoad } from "@/lib/client/use-load"
 import { api, errMsg, fmtDate } from "@/lib/client/api"
 
-type U = { id: number; username: string; email: string | null; role: "admin" | "editor"; mustChangePassword: number; disabledAt: string | null; lastLoginAt: string | null }
+type UserRole = { id: number; name: string; color: string; level: number; isRoot: boolean }
+type U = { id: number; username: string; email: string | null; role: "admin" | "editor"; kind: "human" | "bot"; isRoot: number; mustChangePassword: number; disabledAt: string | null; lastLoginAt: string | null; roles: UserRole[] }
+type RoleData = { roles: UserRole[] }
 
-export default function UsersPage() {
+export default function UsersPage({ isRoot, canAssign }: { isRoot: boolean; canAssign: boolean }) {
   const { data, error, reload } = useLoad<{ users: U[] }>("/api/admin/users")
+  const { data: roleData } = useLoad<RoleData>(canAssign ? "/api/admin/roles" : null)
   const [err, setErr] = useState("")
   const [temp, setTemp] = useState<{ user: string; pw: string } | null>(null)
 
@@ -55,20 +58,24 @@ export default function UsersPage() {
           <tbody>
             {data?.users.map((u) => (
               <tr key={u.id}>
-                <td><strong>{u.username}</strong><div className="muted">{u.email}</div></td>
+                <td><strong>{u.username}</strong>{u.kind === "bot" && <span className="chip">BOT</span>}<div className="muted">{u.email}</div></td>
                 <td>
-                  <select aria-label={`Role for ${u.username}`} value={u.role} style={{ width: 110 }}
-                    onChange={(e) => run(() => api(`/api/admin/users/${u.id}`, { method: "PATCH", body: { role: e.target.value } }))}>
-                    <option value="editor">Editor</option><option value="admin">Admin</option>
-                  </select>
+                  <div className="chips">{u.roles.map((r) => <span key={r.id} className="role-pill" style={{ background: r.color }}>{r.name}</span>)}</div>
+                  {canAssign && !u.isRoot && <select aria-label={`Roles for ${u.username}`} multiple value={u.roles.map((r) => String(r.id))} style={{ minWidth: 140, minHeight: 60, marginTop: 6 }}
+                    onChange={(e) => {
+                      const roleIds = Array.from(e.currentTarget.selectedOptions, (o) => Number(o.value))
+                      run(() => api(`/api/admin/users/${u.id}`, { method: "PATCH", body: { roleIds } }))
+                    }}>
+                    {roleData?.roles.filter((r) => !r.isRoot).map((r) => <option key={r.id} value={r.id}>{r.name} · {r.level}</option>)}
+                  </select>}
                 </td>
                 <td>{u.disabledAt ? <span className="chip chip--warn">disabled</span> : u.mustChangePassword ? <span className="chip">temp password</span> : <span className="chip chip--ok">active</span>}</td>
                 <td>{fmtDate(u.lastLoginAt)}</td>
                 <td>
                   <div className="actions">
                     <button className="btn btn--sm" onClick={() => run(() => api(`/api/admin/users/${u.id}`, { method: "PATCH", body: { disabled: !u.disabledAt } }))}>{u.disabledAt ? "Enable" : "Disable"}</button>
-                    <button className="btn btn--sm" onClick={() => confirm(`Reset password for ${u.username}?`) && run(async () => { const r = await api<{ temporaryPassword: string }>(`/api/admin/users/${u.id}/reset-password`, { method: "POST" }); setTemp({ user: u.username, pw: r.temporaryPassword }) })}>Reset password</button>
-                    <button className="btn btn--sm btn--danger" onClick={() => confirm(`Delete ${u.username}? Their polls move to you.`) && run(() => api(`/api/admin/users/${u.id}`, { method: "DELETE" }))}>Delete</button>
+                    {isRoot && u.kind === "human" && !u.isRoot && <button className="btn btn--sm" onClick={() => confirm(`Reset password for ${u.username}?`) && run(async () => { const r = await api<{ temporaryPassword: string }>(`/api/admin/users/${u.id}/reset-password`, { method: "POST" }); setTemp({ user: u.username, pw: r.temporaryPassword }) })}>Reset password</button>}
+                    <button className="btn btn--sm btn--danger" disabled={!!u.isRoot} onClick={() => confirm(`Delete ${u.username}? Accounts with owned polls must transfer or delete them first.`) && run(() => api(`/api/admin/users/${u.id}`, { method: "DELETE" }))}>Delete</button>
                   </div>
                 </td>
               </tr>

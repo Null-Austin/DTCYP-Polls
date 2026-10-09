@@ -53,8 +53,10 @@ export async function createFirstAdmin(db: DB, body: Record<string, unknown>) {
   const id = db.transaction(() => {
     if (!setupRequired(db)) throw new HttpError(404, "Not found")
     const r = db
-      .prepare("INSERT INTO users (username, email, password_hash, role, must_change_password, created_at, last_login_at) VALUES (?,?,?,?,0,?,?)")
+      .prepare("INSERT INTO users (username, email, password_hash, role, must_change_password, is_root, created_at, last_login_at) VALUES (?,?,?,?,0,1,?,?)")
       .run(username, email, hash, "admin", nowIso(), nowIso())
+    const rootRole = db.prepare("SELECT id FROM roles WHERE is_root = 1").get() as { id: number }
+    db.prepare("INSERT INTO user_roles (user_id, role_id) VALUES (?,?)").run(Number(r.lastInsertRowid), rootRole.id)
     audit(db, Number(r.lastInsertRowid), "setup_admin", { type: "user", id: Number(r.lastInsertRowid) })
     return Number(r.lastInsertRowid)
   }).immediate()

@@ -4,13 +4,15 @@ import { audit } from "./audit"
 import { ownedPoll } from "./authz"
 import { cleanSlug, loadQuestions } from "./polls"
 import { HttpError } from "./http"
-import type { User } from "./auth"
+import type { Actor } from "./rbac"
+import { requireOn } from "./authz"
 
 export const ACTIONS = ["close", "reopen", "archive", "unarchive", "trash", "restore"] as const
 export type Action = (typeof ACTIONS)[number]
 
-export function applyAction(db: DB, user: User, pollId: string, action: Action) {
-  const p = ownedPoll(db, user, pollId, { includeDeleted: action === "restore", need: action === "trash" || action === "restore" ? "owner" : "edit" })
+export function applyAction(db: DB, user: Actor, pollId: string, action: Action) {
+  const needed = action === "trash" || action === "restore" ? "polls:delete" : "polls:publish"
+  const p = ownedPoll(db, user, pollId, { includeDeleted: action === "restore", need: needed })
   const now = nowIso()
   const set = (sql: string, ...a: (string | null)[]) => db.prepare(`UPDATE polls SET ${sql}, updated_at = ? WHERE id = ?`).run(...a, now, p.id)
   if (action === "close") set("status = 'closed'")
@@ -27,8 +29,9 @@ export function applyAction(db: DB, user: User, pollId: string, action: Action) 
   audit(db, user.id, `poll_${action}`, { type: "poll", id: p.id })
 }
 
-export function duplicatePoll(db: DB, user: User, pollId: string, newId: string): string {
-  const src = ownedPoll(db, user, pollId, { need: "view" })
+export function duplicatePoll(db: DB, user: Actor, pollId: string, newId: string): string {
+  const src = ownedPoll(db, user, pollId, { need: "polls:read" })
+  requireOn(db, user, "polls:create", { pollId: src.id, ownerId: src.owner_id })
   const id = cleanSlug(newId)
   if (db.prepare("SELECT 1 FROM polls WHERE id = ?").get(id)) throw new HttpError(409, "That poll id is taken")
   const now = nowIso()

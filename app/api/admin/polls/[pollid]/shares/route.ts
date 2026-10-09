@@ -14,15 +14,15 @@ function list(db: DB, pollId: string) {
     .all(pollId)
 }
 
-export const GET = route<P>({ access: "user" }, ({ db, user, params }) => {
-  const poll = ownedPoll(db, user, params.pollid, { includeDeleted: true, need: "view" })
+export const GET = route<P>({ perm: ["polls:read", "polls:share"] }, ({ db, user, params }) => {
+  const poll = ownedPoll(db, user, params.pollid, { includeDeleted: true, need: "polls:read" })
   const owner = db.prepare("SELECT username FROM users WHERE id = ?").get(poll.owner_id) as { username: string }
   return json({ access: poll.access, owner: owner.username, shares: list(db, poll.id) })
 })
 
 // Owner (or admin) grants or changes access by username.
-export const POST = route<P>({ access: "user" }, async ({ req, db, user, params }) => {
-  const poll = ownedPoll(db, user, params.pollid, { need: "owner" })
+export const POST = route<P>({ perm: ["polls:read", "polls:share"] }, async ({ req, db, user, params }) => {
+  const poll = ownedPoll(db, user, params.pollid, { need: "polls:share" })
   const body = await readJson(req, 512)
   exact(body, ["username", "permission"])
   if (body.permission !== "view" && body.permission !== "edit") throw new HttpError(400, "Invalid permission")
@@ -41,8 +41,8 @@ export const POST = route<P>({ access: "user" }, async ({ req, db, user, params 
 })
 
 // Owner/admin can remove anyone; a shared user can remove themselves.
-export const DELETE = route<P>({ access: "user" }, async ({ req, db, user, params }) => {
-  const poll = ownedPoll(db, user, params.pollid, { need: "view" })
+export const DELETE = route<P>({ perm: ["polls:read", "polls:share"] }, async ({ req, db, user, params }) => {
+  const poll = ownedPoll(db, user, params.pollid, { need: "polls:read" })
   const body = await readJson(req, 256)
   exact(body, ["userId"])
   const uid = intIn(body.userId, 1, 2 ** 31)

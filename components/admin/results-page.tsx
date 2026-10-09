@@ -8,6 +8,7 @@ import { FULL_WARNING } from "@/lib/client/api"
 type Opt = { id: number; label: string; verified: number; unverified: number }
 type Data = {
   title: string
+  access: "view" | "edit" | "owner"
   requireVerification: boolean
   links: { generated: number; answered: number; repeats: number }
   totals: { verified: number; unverified: number; mobile: number; desktop: number }
@@ -21,7 +22,7 @@ export default function ResultsPage({ pollId, isAdmin }: { pollId: string; isAdm
     <>
       <h1>Results</h1>
       <p className="admin__sub">{data?.title ?? pollId}</p>
-      <PollTabs pollId={pollId} current="results" />
+      <PollTabs pollId={pollId} current="results" canLinks={data?.access !== "view"} canShare={data?.access === "owner"} />
       {error && <p className="err">{error}</p>}
       {data && (
         <>
@@ -35,8 +36,9 @@ export default function ResultsPage({ pollId, isAdmin }: { pollId: string; isAdm
             <span className="grow" />
             {isAdmin && (
               <>
-                <a className="btn" href={`/api/admin/export?poll=${pollId}&format=json`} onClick={(e) => { if (!confirm(FULL_WARNING)) e.preventDefault() }}>Super export (JSON)</a>
-                <a className="btn" href={`/api/admin/export?poll=${pollId}&format=csv`} onClick={(e) => { if (!confirm(FULL_WARNING)) e.preventDefault() }}>Super export (CSV)</a>
+                <a className="btn" href={`/api/admin/export?poll=${encodeURIComponent(pollId)}&format=zip`} onClick={(e) => { if (!confirm(FULL_WARNING)) e.preventDefault() }}>ZIP archive</a>
+                <a className="btn" href={`/api/admin/export?poll=${encodeURIComponent(pollId)}&format=json`} onClick={(e) => { if (!confirm(FULL_WARNING)) e.preventDefault() }}>JSON</a>
+                <a className="btn" href={`/api/admin/export?poll=${encodeURIComponent(pollId)}&format=csv`} onClick={(e) => { if (!confirm(FULL_WARNING)) e.preventDefault() }}>CSV</a>
               </>
             )}
             <a className="btn" href={`/api/admin/polls/${pollId}/results/export`}>Export results CSV</a>

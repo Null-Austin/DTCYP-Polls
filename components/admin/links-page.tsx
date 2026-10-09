@@ -4,6 +4,7 @@ import { useState } from "react"
 import PollTabs from "./poll-tabs"
 import { api, errMsg, fmtDate } from "@/lib/client/api"
 import { useLoad } from "@/lib/client/use-load"
+import GroupsPanel from "./groups-panel"
 
 type Batch = { id: number; label: string; count: number; createdAt: string; revoked: number; verified: number; unverified: number }
 type Data = {
@@ -19,14 +20,17 @@ const exportUrl = (id: number, f: string) => `/api/admin/batches/${id}/export?fo
 export default function LinksPage({ pollId }: { pollId: string }) {
   const [search, setSearch] = useState("")
   const { data, error, reload } = useLoad<Data>(`/api/admin/polls/${pollId}/links${search ? `?q=${encodeURIComponent(search)}` : ""}`)
-  const [count, setCount] = useState(50)
+  const [input, setInput] = useState("50")
   const [label, setLabel] = useState("")
   const [format, setFormat] = useState<"csv" | "txt">("csv")
   const [sel, setSel] = useState<number | null>(null)
   const [toast, setToast] = useState("")
   const [err, setErr] = useState("")
   const [busy, setBusy] = useState(false)
-  const clamp = (n: number) => Math.min(10000, Math.max(1, Math.round(n) || 1))
+  const source = input.trim()
+  const titles = source && !/^\d+$/.test(source) ? (source.includes("\n") ? source.split(/\r?\n/) : source.split(",")).map((x) => x.trim()).filter(Boolean) : []
+  const previewCount = /^\d+$/.test(source) ? Number(source) : titles.length
+  const duplicates = [...new Set(titles.filter((t, i) => titles.findIndex((x) => x.toLowerCase() === t.toLowerCase()) !== i))]
   const flash = (m: string) => {
     setToast(m)
     setTimeout(() => setToast(""), 3500)
@@ -36,10 +40,11 @@ export default function LinksPage({ pollId }: { pollId: string }) {
     setBusy(true)
     setErr("")
     try {
-      const r = await api<{ batchId: number; count: number }>(`/api/admin/polls/${pollId}/links`, { method: "POST", body: { count, label } })
+      const r = await api<{ batchId: number; count: number; duplicateTitles: string[] }>(`/api/admin/polls/${pollId}/links`, { method: "POST", body: { input, label } })
       window.location.assign(exportUrl(r.batchId, format))
-      flash(`${r.count} links ready`)
+      flash(`${r.count} URLs ready${r.duplicateTitles.length ? `; ${r.duplicateTitles.length} duplicate titles` : ""}`)
       setLabel("")
+      setInput("50")
       await reload()
     } catch (e) {
       setErr(errMsg(e))
@@ -76,26 +81,18 @@ export default function LinksPage({ pollId }: { pollId: string }) {
     <>
       <h1>Export links</h1>
       <p className="admin__sub">{data?.pollTitle ?? pollId}</p>
-      <PollTabs pollId={pollId} current="links" />
+      <PollTabs pollId={pollId} current="links" canLinks={data?.access !== "view"} canResults canShare={data?.access === "owner"} />
       {toast && <div className="toast" role="status">✅ {toast}</div>}
       {(error || err) && <p className="err" role="alert">{error || err}</p>}
 
       <section className="panel" hidden={data?.access === "view"}>
         <div className="form">
           <label>Batch label (optional)<input value={label} maxLength={100} onChange={(e) => setLabel(e.target.value)} placeholder="April 10th" /></label>
-          <div className="field">
-            <span id="links-lbl">Links</span>
-            <div className="row">
-              <div className="chips" role="group" aria-labelledby="links-lbl">
-                {[10, 25, 50, 100].map((n) => <button key={n} aria-pressed={count === n} onClick={() => setCount(n)}>{n}</button>)}
-              </div>
-              <div className="stepper">
-                <button className="btn btn--sm" aria-label="Decrease" onClick={() => setCount(clamp(count - 1))}>−</button>
-                <input type="number" aria-label="Number of links" min={1} max={10000} value={count} onChange={(e) => setCount(clamp(Number(e.target.value)))} />
-                <button className="btn btn--sm" aria-label="Increase" onClick={() => setCount(clamp(count + 1))}>+</button>
-              </div>
-            </div>
-          </div>
+          <label className="field">Add URLs: enter a count, one title per line, or comma-separated titles
+            <textarea rows={4} maxLength={100000} value={input} onChange={(e) => setInput(e.target.value)} />
+          </label>
+          <p className="muted">This will create {previewCount || 0} URLs.{duplicates.length > 0 && <span className="warn"> Duplicate titles: {duplicates.join(", ")}</span>}</p>
+          <div className="chips" aria-label="Quick counts">{[10, 25, 50, 100].map((n) => <button key={n} aria-pressed={input === String(n)} onClick={() => setInput(String(n))}>{n}</button>)}</div>
           <div className="field">
             <span id="fmt-lbl">Format</span>
             <div className="seg" role="group" aria-labelledby="fmt-lbl">
@@ -103,7 +100,7 @@ export default function LinksPage({ pollId }: { pollId: string }) {
               <button aria-pressed={format === "txt"} onClick={() => setFormat("txt")}>Plain text</button>
             </div>
           </div>
-          <div><button className="btn btn--primary" disabled={busy} onClick={generate}>Generate &amp; download</button></div>
+          <div><button className="btn btn--primary" disabled={busy || !previewCount || previewCount > 10000} onClick={generate}>Generate &amp; download</button></div>
         </div>
       </section>
 
@@ -160,6 +157,7 @@ export default function LinksPage({ pollId }: { pollId: string }) {
           <div><small>Repeat answers (unverified)</small><strong className="warn">{data.stats.repeats} ⚠️</strong></div>
         </div>
       )}
+      {data && <GroupsPanel pollId={pollId} editable={data.access !== "view"} exportable={data.access !== "view"} />}
     </>
   )
 }

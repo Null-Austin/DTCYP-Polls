@@ -181,8 +181,13 @@ describe("public poll access", () => {
     expect(row.submitted_at).toMatch(/T\d\d:00:00\.000Z$/)
     const dump = JSON.stringify(db.prepare("SELECT * FROM responses").all()) + JSON.stringify(db.prepare("SELECT * FROM audit_log").all())
     for (const needle of ["UNIQUE-UA-MARKER", "203.0.113.77", "UNIQUE-REFERER", "Mozilla"]) expect(dump).not.toContain(needle)
-    const cols = (db.prepare("SELECT m.name AS t, p.name AS c FROM sqlite_master m, pragma_table_info(m.name) p WHERE m.type='table'").all() as { t: string; c: string }[]).map((r) => r.c)
+    // Respondent-facing tables only: staff-side IP capture (bots, audit) is opt-in and tested separately.
+    const cols = (db.prepare("SELECT m.name AS t, p.name AS c FROM sqlite_master m, pragma_table_info(m.name) p WHERE m.type='table' AND m.name IN ('responses','answers','links','link_batches','polls','questions','options')").all() as { t: string; c: string }[]).map((r) => r.c)
     expect(cols.filter((c) => /^ip$|_ip$|^ip_|agent|referr|fingerprint/i.test(c))).toEqual([])
+    const responseEvent = db.prepare("SELECT at, ip, user_agent FROM audit_log WHERE action = 'response_submitted'").get() as { at: string; ip: string | null; user_agent: string | null }
+    expect(responseEvent.at).toMatch(/T\d\d:00:00\.000Z$/)
+    expect(responseEvent.ip).toBeNull()
+    expect(responseEvent.user_agent).toBeNull()
   })
 })
 
@@ -366,24 +371,35 @@ describe("authorization", () => {
     expect((await call(usersR.POST, "POST", "/x", { auth: admin, body: { username: "x1x", role: "editor", password: "abc", disabledAt: null } })).status).toBe(400)
   })
 
-  it("the last active admin cannot be demoted, disabled or deleted", async () => {
+  it("rootadmin cannot be changed through HTTP, and equal-level users cannot manage each other", async () => {
     const admin = await setupAdmin()
     const me = (await call(meR.GET, "GET", "/x", { auth: admin })).data.user as { id: number }
     const p = { id: String(me.id) }
-    expect((await call(userR.PATCH, "PATCH", "/x", { auth: admin, params: p, body: { role: "editor" } })).status).toBe(409)
-    expect((await call(userR.PATCH, "PATCH", "/x", { auth: admin, params: p, body: { disabled: true } })).status).toBe(409)
-    expect((await call(userR.DELETE, "DELETE", "/x", { auth: admin, params: p })).status).toBe(409)
-    const second = await call(usersR.POST, "POST", "/x", { auth: admin, body: { username: "admin2", role: "admin" } })
-    expect((await call(userR.PATCH, "PATCH", "/x", { auth: admin, params: p, body: { role: "editor" } })).status).toBe(200)
-    // admin2 is now the last one
-    const l = await call(loginR.POST, "POST", "/x", { body: { username: "admin2", password: second.data.temporaryPassword } })
-    const a2 = authFrom(await call(pwR.POST, "POST", "/x", { auth: authFrom(l), body: { current: second.data.temporaryPassword, next: "another-long-passphrase" } }))
-    expect((await call(userR.DELETE, "DELETE", "/x", { auth: a2, params: { id: String(second.data.id) } })).status).toBe(409)
+    expect((await call(userR.PATCH, "PATCH", "/x", { auth: admin, params: p, body: { roleIds: [3] } })).status).toBe(403)
+    expect((await call(userR.PATCH, "PATCH", "/x", { auth: admin, params: p, body: { disabled: true } })).status).toBe(403)
+    expect((await call(userR.DELETE, "DELETE", "/x", { auth: admin, params: p })).status).toBe(403)
+    expect(db.prepare("SELECT is_root FROM users WHERE id = ?").get(me.id)).toEqual({ is_root: 1 })
+
+    const a = await call(usersR.POST, "POST", "/x", { auth: admin, body: { username: "admin2", role: "admin" } })
+    const b = await call(usersR.POST, "POST", "/x", { auth: admin, body: { username: "admin3", role: "admin" } })
+    const login = async (username: string, temporaryPassword: unknown) => {
+      const l = await call(loginR.POST, "POST", "/x", { body: { username, password: temporaryPassword } })
+      return authFrom(await call(pwR.POST, "POST", "/x", { auth: authFrom(l), body: { current: temporaryPassword, next: "another-long-passphrase" } }))
+    }
+    const a2 = await login("admin2", a.data.temporaryPassword)
+    const a3 = await login("admin3", b.data.temporaryPassword)
+    expect((await call(userR.PATCH, "PATCH", "/x", { auth: a2, params: { id: String(b.data.id) }, body: { disabled: true } })).status).toBe(403)
+    expect((await call(userR.DELETE, "DELETE", "/x", { auth: a2, params: { id: String(b.data.id) } })).status).toBe(403)
+    expect((await call(userR.PATCH, "PATCH", "/x", { auth: admin, params: { id: String(b.data.id) }, body: { disabled: true } })).status).toBe(200)
+    expect((await call(userR.PATCH, "PATCH", "/x", { auth: a3, params: { id: String(a.data.id) }, body: { disabled: true } })).status).toBe(401)
   })
 
   it("admin password reset forces change and kills sessions", async () => {
     const admin = await setupAdmin()
     const mk = await call(usersR.POST, "POST", "/x", { auth: admin, body: { username: "edit", role: "editor" } })
+    const l = await call(loginR.POST, "POST", "/x", { body: { username: "edit", password: mk.data.temporaryPassword } })
+    const ed = authFrom(await call(pwR.POST, "POST", "/x", { auth: authFrom(l), body: { current: mk.data.temporaryPassword, next: "another-long-passphrase" } }))
+    expect((await call(resetR.POST, "POST", "/x", { auth: ed, params: { id: String(mk.data.id) } })).status).toBe(403)
     const r = await call(resetR.POST, "POST", "/x", { auth: admin, params: { id: String(mk.data.id) } })
     expect(typeof r.data.temporaryPassword).toBe("string")
     expect(db.prepare("SELECT must_change_password AS m FROM users WHERE username='edit'").get()).toEqual({ m: 1 })
@@ -549,7 +565,7 @@ describe("sharing polls", () => {
     // viewer: read only
     expect((await call(pollR.GET, "GET", "/x", { auth: viewer.auth, params: p })).data.access).toBe("view")
     expect((await call(resultsR.GET, "GET", "/x", { auth: viewer.auth, params: p })).status).toBe(200)
-    expect((await call(linksR.GET, "GET", "/x", { auth: viewer.auth, params: p })).status).toBe(200)
+    expect((await call(linksR.GET, "GET", "/x", { auth: viewer.auth, params: p })).status).toBe(403)
     expect((await call(pollR.PATCH, "PATCH", "/x", { auth: viewer.auth, params: p, body: { title: "x" } })).status).toBe(403)
     expect((await call(linksR.POST, "POST", "/x", { auth: viewer.auth, params: p, body: { count: 1 } })).status).toBe(403)
     expect((await call(exportR.GET, "GET", "/x?format=txt", { auth: viewer.auth, params: { batchid: String(batchId) } })).status).toBe(403)
